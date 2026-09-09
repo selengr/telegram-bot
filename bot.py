@@ -8,7 +8,8 @@ import logging
 import os
 import random
 import re
-from datetime import datetime
+import time
+from datetime import datetime, time as dt_time
 
 from dotenv import load_dotenv
 from telegram import (
@@ -34,6 +35,7 @@ from telegram.ext import (
 )
 
 import db
+import hangman as hangman_game
 
 
 load_dotenv()
@@ -316,7 +318,9 @@ UI = {
             "*منوی حرفه‌ای ربات*\n\n"
             "🎭 سرگرمی: جوک، تیکه، تعریف، فال روزانه\n"
             "🎮 بازی: جرات/حقیقت، کدوم‌و، کوییز، داستان\n"
-            "🏆 پیشرفت: آمار، بج‌ها، جدول امتیاز\n"
+            "🏆 پیشرفت: آمار، بج‌ها، جدول امتیاز، XP\n"
+            "📣 رشد: دعوت دوستان، یادآور روزانه\n"
+            "🔤 بازی جدید: حدس کلمه (/hangman)\n"
             "👥 گروه: خوش‌آمدگویی خودکار به اعضای جدید\n"
             "⚙️ زبان: /fa /en\n\n"
             "توی هر چتی بنویس `@{bot}` تا اینلاین جوک بفرستی!"
@@ -329,19 +333,39 @@ UI = {
         "stats": (
             "📊 *پروفایل خنده*\n"
             "نام: {name}\n"
+            "لقب: {title}\n"
+            "لول: *{level}* | XP: *{xp}*\n"
+            "`[{bar}]` {into}/100\n"
             "جوک‌ها: {jokes}\n"
             "بازی‌ها: {games}\n"
             "امتیاز کوییز: {quiz}\n"
             "فال روزانه: {daily}\n"
-            "استریک: {streak} 🔥"
+            "استریک: {streak} 🔥\n"
+            "دعوت‌ها: {invites}"
         ),
         "top": "🏆 *جدول خنده‌دارها*\n\n{rows}",
         "top_empty": "هنوز کسی امتیاز نداره. اولین نفر باش!",
-        "top_row": "{rank}. {name} — {score} امتیاز (🧠{quiz})",
+        "top_row": "{rank}. {name} — L{level} | {xp} XP",
         "badges": "🎖️ *بج‌های تو*\n\n{rows}",
         "badges_empty": "هنوز بج نداری. جوک بگو، بازی کن، فال روزانه بگیر!",
         "badge_new": "🎉 بج جدید باز شد: *{name}*",
+        "level_up": "🚀 لول آپ! حالا لول *{level}* هستی\nلقب جدید: *{title}*",
         "welcome": "خوش اومدی {name}! 🎉\nاینجا بخش خنده‌ست — بزن /menu",
+        "invite": (
+            "📣 *لینک دعوت تو*\n"
+            "`{link}`\n\n"
+            "هر دوست با این لینک بیاد، تو *۵۰ XP* می‌گیری!\n"
+            "دعوت‌های موفق: *{invites}*"
+        ),
+        "invite_ok": "🎁 با دعوت دوست اومدی! *۲۵ XP* هدیه گرفتی.",
+        "remind_on": "⏰ یادآور روزانه روشن شد (حدود ساعت ۹ صبح).",
+        "remind_off": "⏰ یادآور روزانه خاموش شد.",
+        "remind_push": "🌞 جوک صبحگاهی:\n😂 {joke}\n\n/daily رو هم فراموش نکن!",
+        "hang_guess_hint": "یه حرف بفرست یا از دکمه‌ها استفاده کن.",
+        "hang_win": "🎉 بردی! کلمه: *{word}*\n+۳۰ XP",
+        "hang_lose": "💀 باختی! کلمه: *{word}*",
+        "hang_repeat": "این حرف رو قبلاً زدی.",
+        "rate_limit": "آروم‌تر رفیق 😅 یه لحظه صبر کن.",
         "share": "این ربات رو بفرست برای دوستات 👇",
         "share_text": "بیا این ربات خنده‌دار رو امتحان کن 😄",
         "story": "📖 {hero} رفت به {place}… {twist}… {ending}",
@@ -383,6 +407,9 @@ UI = {
             "share": "📤 اشتراک",
             "top": "🏆 جدول",
             "badges": "🎖️ بج‌ها",
+            "hang": "🔤 حدس کلمه",
+            "invite": "📣 دعوت",
+            "remind": "⏰ یادآور",
             "help": "❓ راهنما",
             "back": "↩️ بازگشت",
             "again": "🔁 دوباره",
@@ -401,10 +428,13 @@ UI = {
             ("tod", "حقیقت یا جرات"),
             ("wyr", "کدوم‌و انتخاب کنی"),
             ("quiz", "کوییز سریع"),
+            ("hangman", "حدس کلمه"),
             ("story", "داستان آشوبی"),
-            ("stats", "آمار من"),
+            ("stats", "پروفایل و XP"),
             ("top", "جدول امتیاز"),
             ("badges", "بج‌های من"),
+            ("invite", "لینک دعوت"),
+            ("remind", "یادآور روزانه"),
             ("share", "اشتراک‌گذاری"),
             ("fa", "فارسی"),
             ("en", "English"),
@@ -423,7 +453,9 @@ UI = {
             "*Pro bot menu*\n\n"
             "🎭 Fun: joke, roast, compliment, daily luck\n"
             "🎮 Games: truth/dare, would-you-rather, quiz, story\n"
-            "🏆 Progress: stats, badges, leaderboard\n"
+            "🏆 Progress: stats, badges, leaderboard, XP\n"
+            "📣 Growth: invites, daily reminder\n"
+            "🔤 New game: hangman (/hangman)\n"
             "👥 Groups: auto-welcome for new members\n"
             "⚙️ Language: /fa /en\n\n"
             "Type `@{bot}` in any chat for inline jokes!"
@@ -436,19 +468,39 @@ UI = {
         "stats": (
             "📊 *Fun profile*\n"
             "Name: {name}\n"
+            "Title: {title}\n"
+            "Level: *{level}* | XP: *{xp}*\n"
+            "`[{bar}]` {into}/100\n"
             "Jokes: {jokes}\n"
             "Games: {games}\n"
             "Quiz score: {quiz}\n"
             "Daily luck: {daily}\n"
-            "Streak: {streak} 🔥"
+            "Streak: {streak} 🔥\n"
+            "Invites: {invites}"
         ),
         "top": "🏆 *Leaderboard*\n\n{rows}",
         "top_empty": "Nobody scored yet. Be first!",
-        "top_row": "{rank}. {name} — {score} pts (🧠{quiz})",
+        "top_row": "{rank}. {name} — L{level} | {xp} XP",
         "badges": "🎖️ *Your badges*\n\n{rows}",
         "badges_empty": "No badges yet. Joke, play, claim daily luck!",
         "badge_new": "🎉 New badge unlocked: *{name}*",
+        "level_up": "🚀 Level up! You are now level *{level}*\nNew title: *{title}*",
         "welcome": "Welcome {name}! 🎉\nThis chat is for laughs — tap /menu",
+        "invite": (
+            "📣 *Your invite link*\n"
+            "`{link}`\n\n"
+            "Friends joining with it give you *50 XP*!\n"
+            "Successful invites: *{invites}*"
+        ),
+        "invite_ok": "🎁 You joined via invite! *+25 XP* gift.",
+        "remind_on": "⏰ Daily reminder ON (around 9 AM).",
+        "remind_off": "⏰ Daily reminder OFF.",
+        "remind_push": "🌞 Morning joke:\n😂 {joke}\n\nDon't forget /daily !",
+        "hang_guess_hint": "Send a letter or use the buttons.",
+        "hang_win": "🎉 You won! Word: *{word}*\n+30 XP",
+        "hang_lose": "💀 You lost! Word: *{word}*",
+        "hang_repeat": "You already tried that.",
+        "rate_limit": "Slow down a sec 😅",
         "share": "Share this bot with friends 👇",
         "share_text": "Try this funny Telegram bot 😄",
         "story": "📖 {hero} went to {place}… {twist}… {ending}",
@@ -490,6 +542,9 @@ UI = {
             "share": "📤 Share",
             "top": "🏆 Top",
             "badges": "🎖️ Badges",
+            "hang": "🔤 Hangman",
+            "invite": "📣 Invite",
+            "remind": "⏰ Remind",
             "help": "❓ Help",
             "back": "↩️ Back",
             "again": "🔁 Again",
@@ -508,10 +563,13 @@ UI = {
             ("tod", "Truth or dare"),
             ("wyr", "Would you rather"),
             ("quiz", "Quick quiz"),
+            ("hangman", "Hangman word game"),
             ("story", "Chaos story"),
-            ("stats", "My stats"),
+            ("stats", "Profile & XP"),
             ("top", "Leaderboard"),
             ("badges", "My badges"),
+            ("invite", "Invite link"),
+            ("remind", "Daily reminder"),
             ("share", "Share bot"),
             ("fa", "فارسی"),
             ("en", "English"),
@@ -558,13 +616,39 @@ def bump(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, amount: i
     if not user_id:
         return 0
     value = db.bump_stat(user_id, key, amount)
-    # Keep a light cache for UI
     stats = context.user_data.setdefault("stats", {})
     stats[key] = value
     return value
 
 
+async def grant_pending_xp(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None) -> None:
+    user_id = sync_user(update, context)
+    amount = int(context.user_data.pop("_pending_xp", 0) or 0)
+    if not user_id or amount <= 0:
+        return
+    new_xp, new_level, leveled = db.add_xp(user_id, amount)
+    if leveled:
+        target = message or update.effective_message
+        await target.reply_text(
+            t(context)["level_up"].format(
+                level=new_level,
+                title=db.title_for(new_xp, lang(context)),
+            ),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+def rate_ok(context: ContextTypes.DEFAULT_TYPE, cooldown: float = 0.7) -> bool:
+    now = time.monotonic()
+    last = float(context.user_data.get("_rl", 0))
+    if now - last < cooldown:
+        return False
+    context.user_data["_rl"] = now
+    return True
+
+
 async def maybe_announce_badges(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None) -> None:
+    await grant_pending_xp(update, context, message=message)
     user_id = sync_user(update, context)
     if not user_id:
         return
@@ -597,9 +681,9 @@ def main_inline(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(b["joke"], callback_data="act:joke"), InlineKeyboardButton(b["roast"], callback_data="act:roast")],
             [InlineKeyboardButton(b["comp"], callback_data="act:comp"), InlineKeyboardButton(b["daily"], callback_data="act:daily")],
-            [InlineKeyboardButton(b["tod"], callback_data="menu:games"), InlineKeyboardButton(b["quiz"], callback_data="act:quiz")],
+            [InlineKeyboardButton(b["hang"], callback_data="act:hang"), InlineKeyboardButton(b["quiz"], callback_data="act:quiz")],
             [InlineKeyboardButton(b["stats"], callback_data="act:stats"), InlineKeyboardButton(b["top"], callback_data="act:top")],
-            [InlineKeyboardButton(b["badges"], callback_data="act:badges"), InlineKeyboardButton(b["share"], callback_data="act:share")],
+            [InlineKeyboardButton(b["invite"], callback_data="act:invite"), InlineKeyboardButton(b["remind"], callback_data="act:remind")],
             [InlineKeyboardButton(b["fa"], callback_data="lang:fa"), InlineKeyboardButton(b["en"], callback_data="lang:en")],
         ]
     )
@@ -610,8 +694,8 @@ def games_inline(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(b["tod"], callback_data="act:tod"), InlineKeyboardButton(b["wyr"], callback_data="act:wyr")],
-            [InlineKeyboardButton(b["quiz"], callback_data="act:quiz"), InlineKeyboardButton(b["story"], callback_data="act:story")],
-            [InlineKeyboardButton(b["coin"], callback_data="act:coin")],
+            [InlineKeyboardButton(b["quiz"], callback_data="act:quiz"), InlineKeyboardButton(b["hang"], callback_data="act:hang")],
+            [InlineKeyboardButton(b["story"], callback_data="act:story"), InlineKeyboardButton(b["coin"], callback_data="act:coin")],
             [InlineKeyboardButton(b["back"], callback_data="menu:main")],
         ]
     )
@@ -641,13 +725,43 @@ async def setup_commands(app: Application) -> None:
     await app.bot.set_my_commands(fa_cmds, scope=BotCommandScopeDefault())
     me = await app.bot.get_me()
     app.bot_data["username"] = me.username or ""
+    if app.job_queue:
+        # Local morning reminder ~09:00 (server time)
+        app.job_queue.run_daily(send_morning_reminders, time=dt_time(hour=9, minute=0))
+        logger.info("Daily reminder job scheduled at 09:00")
     logger.info("Commands menu set. Bot @%s", me.username)
 
 
+async def send_morning_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+    for user in db.reminder_users():
+        joke = random.choice(JOKES[user.get("lang") if user.get("lang") in ("fa", "en") else "fa"])
+        text = UI[user.get("lang") if user.get("lang") in ("fa", "en") else "fa"]["remind_push"].format(joke=joke)
+        try:
+            await context.bot.send_message(chat_id=user["user_id"], text=text)
+        except Exception:
+            logger.exception("Reminder failed for %s", user.get("user_id"))
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    was_new = False
+    if user:
+        was_new = not db.get_stats(user.id)
     sync_user(update, context)
     if "lang" not in context.user_data:
-        set_lang(context, "fa", update.effective_user.id if update.effective_user else None)
+        set_lang(context, "fa", user.id if user else None)
+
+    if was_new and context.args and user:
+        payload = context.args[0]
+        if payload.startswith("ref_"):
+            try:
+                ref_id = int(payload.replace("ref_", "", 1))
+            except ValueError:
+                ref_id = 0
+            if db.apply_referral(user.id, ref_id):
+                await update.message.reply_text(t(context)["invite_ok"], parse_mode=ParseMode.MARKDOWN)
+                await maybe_announce_badges(update, context)
+
     await typing(update, context)
     text = t(context)["start"].format(name=name_of(update, context))
     await update.message.reply_text(
@@ -695,21 +809,30 @@ async def set_en(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await menu_cmd(update, context)
 
 
+def award_xp(context: ContextTypes.DEFAULT_TYPE, amount: int) -> None:
+    if amount > 0:
+        context.user_data["_pending_xp"] = int(context.user_data.get("_pending_xp", 0) or 0) + amount
+
+
 def joke_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     bump(update, context, "jokes")
+    award_xp(context, 5)
     return f"😂 {random.choice(JOKES[lang(context)])}"
 
 
 def roast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    award_xp(context, 3)
     return f"🔥 {random.choice(ROASTS[lang(context)]).format(name=name_of(update, context))}"
 
 
 def comp_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    award_xp(context, 3)
     return f"💖 {random.choice(COMPLIMENTS[lang(context)]).format(name=name_of(update, context))}"
 
 
 def story_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     bump(update, context, "games")
+    award_xp(context, 8)
     bits = STORY_BITS[lang(context)]
     return t(context)["story"].format(
         hero=random.choice(bits["heroes"]),
@@ -726,6 +849,8 @@ def daily_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     if not user:
         return t(context)["daily_new"].format(fortune=fortune_pool, streak=1)
     is_new, fortune, streak = db.claim_daily(user.id, fortune_pool)
+    if is_new:
+        award_xp(context, 20)
     key = "daily_new" if is_new else "daily_used"
     return t(context)[key].format(fortune=fortune, streak=streak)
 
@@ -733,13 +858,20 @@ def daily_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
 def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     user_id = sync_user(update, context)
     s = db.get_stats(user_id) if user_id else {}
+    xp = int(s.get("xp", 0) or 0)
     return t(context)["stats"].format(
         name=name_of(update, context),
+        title=db.title_for(xp, lang(context)),
+        level=db.level_from_xp(xp),
+        xp=xp,
+        bar=db.xp_bar(xp),
+        into=xp % 100,
         jokes=s.get("jokes", 0),
         games=s.get("games", 0),
         quiz=s.get("quiz", 0),
         daily=s.get("daily", 0),
         streak=s.get("streak", 0),
+        invites=s.get("invites", 0),
     )
 
 
@@ -751,12 +883,13 @@ def top_text(context: ContextTypes.DEFAULT_TYPE) -> str:
     lines = []
     for i, row in enumerate(rows, start=1):
         name = row.get("name") or ui["friend"]
+        xp = int(row.get("xp", 0) or 0)
         lines.append(
             ui["top_row"].format(
                 rank=i,
                 name=name,
-                score=row.get("score", 0),
-                quiz=row.get("quiz", 0),
+                level=db.level_from_xp(xp),
+                xp=xp,
             )
         )
     return ui["top"].format(rows="\n".join(lines))
@@ -794,10 +927,12 @@ async def joke_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def roast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(roast_text(update, context), reply_markup=again_kb(context, "roast"))
+    await maybe_announce_badges(update, context)
 
 
 async def compliment_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(comp_text(update, context), reply_markup=again_kb(context, "comp"))
+    await maybe_announce_badges(update, context)
 
 
 async def daily_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -835,6 +970,105 @@ async def badges_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+def hangman_markup(context: ContextTypes.DEFAULT_TYPE, game: dict) -> InlineKeyboardMarkup:
+    used = set(game.get("guessed", []))
+    rows = []
+    for row in hangman_game.letter_keyboard(lang(context)):
+        buttons = []
+        for ch in row:
+            if ch in used:
+                continue
+            buttons.append(InlineKeyboardButton(ch, callback_data=f"hg:{ch}"))
+            if len(buttons) == 7:
+                rows.append(buttons)
+                buttons = []
+        if buttons:
+            rows.append(buttons)
+    rows.append([InlineKeyboardButton(t(context)["btn"]["back"], callback_data="menu:games")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def begin_hangman(update: Update, context: ContextTypes.DEFAULT_TYPE, message) -> None:
+    game = hangman_game.start_game(lang(context))
+    context.user_data["hangman"] = game
+    bump(update, context, "games")
+    award_xp(context, 5)
+    await message.reply_text(
+        hangman_game.render(game, lang(context)),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=hangman_markup(context, game),
+    )
+    await maybe_announce_badges(update, context, message=message)
+
+
+async def resolve_hangman(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    letter: str,
+    message,
+) -> None:
+    game = context.user_data.get("hangman")
+    ui = t(context)
+    if not game:
+        await begin_hangman(update, context, message)
+        return
+    status = hangman_game.guess(game, letter)
+    if status == "repeat":
+        await message.reply_text(ui["hang_repeat"])
+        return
+    if status == "win":
+        context.user_data.pop("hangman", None)
+        bump(update, context, "hangman_wins")
+        award_xp(context, 30)
+        await message.reply_text(
+            ui["hang_win"].format(word=game["word"]),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=again_kb(context, "hang"),
+        )
+        await maybe_announce_badges(update, context, message=message)
+        return
+    if status == "lose":
+        context.user_data.pop("hangman", None)
+        await message.reply_text(
+            ui["hang_lose"].format(word=game["word"]),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=again_kb(context, "hang"),
+        )
+        return
+    await message.reply_text(
+        hangman_game.render(game, lang(context)),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=hangman_markup(context, game),
+    )
+
+
+async def hangman_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await begin_hangman(update, context, update.message)
+
+
+async def invite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = sync_user(update, context)
+    bot = context.application.bot_data.get("username", "")
+    s = db.get_stats(user_id) if user_id else {}
+    link = f"https://t.me/{bot}?start=ref_{user_id}" if bot and user_id else ""
+    msg = update.effective_message
+    await msg.reply_text(
+        t(context)["invite"].format(link=link, invites=s.get("invites", 0)),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_inline(context),
+    )
+
+
+async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = sync_user(update, context)
+    if not user_id:
+        return
+    s = db.get_stats(user_id)
+    enabled = not bool(s.get("remind"))
+    db.set_remind(user_id, enabled)
+    await update.effective_message.reply_text(t(context)["remind_on" if enabled else "remind_off"])
+
+
 async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_share(update, context)
 
@@ -853,6 +1087,7 @@ async def tod_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def wyr_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     a, b_opt = random.choice(WYR[lang(context)])
     bump(update, context, "games")
+    award_xp(context, 8)
     kb = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(f"🅰️ {a}", callback_data="wyr:pick")],
@@ -904,6 +1139,7 @@ async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, message)
     item = random.choice(QUIZ[lang(context)])
     context.user_data["quiz"] = item
     bump(update, context, "games")
+    award_xp(context, 5)
     buttons = [
         [InlineKeyboardButton(opt, callback_data=f"quiz:{i}")]
         for i, opt in enumerate(item["options"])
@@ -949,6 +1185,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if data.startswith("tod:"):
         kind = data.split(":", 1)[1]
         bump(update, context, "games")
+        award_xp(context, 8)
         if kind == "truth":
             text = ui["truth"].format(text=random.choice(TRUTHS[lang(context)]))
         else:
@@ -976,6 +1213,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         choice = int(data.split(":", 1)[1])
         if choice == item["answer"]:
             score = bump(update, context, "quiz", 10)
+            award_xp(context, 15)
             msg = ui["quiz_ok"].format(score=score)
         else:
             user_id = sync_user(update, context)
@@ -983,6 +1221,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             msg = ui["quiz_bad"].format(ans=item["options"][item["answer"]], score=score)
         await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "quiz"))
         await maybe_announce_badges(update, context, message=query.message)
+        return
+
+    if data.startswith("hg:"):
+        letter = data.split(":", 1)[1]
+        await resolve_hangman(update, context, letter, query.message)
         return
 
     if data.startswith("act:"):
@@ -994,8 +1237,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await maybe_announce_badges(update, context, message=query.message)
         elif action == "roast":
             await query.message.reply_text(roast_text(update, context), reply_markup=again_kb(context, "roast"))
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "comp":
             await query.message.reply_text(comp_text(update, context), reply_markup=again_kb(context, "comp"))
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "daily":
             await query.message.reply_text(
                 daily_text(update, context),
@@ -1020,6 +1265,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=main_inline(context),
             )
+        elif action == "invite":
+            await invite_cmd(update, context)
+        elif action == "remind":
+            await remind_cmd(update, context)
+        elif action == "hang":
+            await begin_hangman(update, context, query.message)
         elif action == "share":
             await send_share(update, context, message=query.message)
         elif action == "coin":
@@ -1041,6 +1292,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         elif action == "wyr":
             a, b_opt = random.choice(WYR[lang(context)])
             bump(update, context, "games")
+            award_xp(context, 8)
             kb = InlineKeyboardMarkup(
                 [
                     [InlineKeyboardButton(f"🅰️ {a}", callback_data="wyr:pick")],
@@ -1062,6 +1314,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if "lang" not in context.user_data and PERSIAN_RE.search(text_raw):
         uid = update.effective_user.id if update.effective_user else None
         set_lang(context, "fa", uid)
+
+    if not rate_ok(context):
+        await update.message.reply_text(t(context)["rate_limit"])
+        return
+
+    # Active hangman: treat short messages as guesses
+    if context.user_data.get("hangman") and text and not text.startswith("/"):
+        kb_labels = set(t(context)["kb"].values())
+        if text not in kb_labels:
+            await resolve_hangman(update, context, text, update.message)
+            return
 
     kb = t(context)["kb"]
     mapping = {
@@ -1169,10 +1432,13 @@ def main() -> None:
     app.add_handler(CommandHandler("tod", tod_cmd))
     app.add_handler(CommandHandler("wyr", wyr_cmd))
     app.add_handler(CommandHandler("quiz", quiz_cmd))
+    app.add_handler(CommandHandler("hangman", hangman_cmd))
     app.add_handler(CommandHandler("story", story_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("top", top_cmd))
     app.add_handler(CommandHandler("badges", badges_cmd))
+    app.add_handler(CommandHandler("invite", invite_cmd))
+    app.add_handler(CommandHandler("remind", remind_cmd))
     app.add_handler(CommandHandler("share", share_cmd))
     app.add_handler(CommandHandler("flip", coin_cmd))
     app.add_handler(CommandHandler("coin", coin_cmd))
