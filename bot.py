@@ -8,7 +8,7 @@ import logging
 import os
 import random
 import re
-from datetime import date, datetime
+from datetime import datetime
 
 from dotenv import load_dotenv
 from telegram import (
@@ -32,6 +32,9 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+import db
+
 
 load_dotenv()
 
@@ -208,6 +211,21 @@ QUIZ = {
             "options": ["ارور مرگ", "اوکیه", "برگرد فردا", "رمز اشتباهه"],
             "answer": 1,
         },
+        {
+            "q": "معمولاً برای ذخیره داده سبک ربات چی خوبه؟",
+            "options": ["کاغذ", "SQLite", "فکس", "رادیو"],
+            "answer": 1,
+        },
+        {
+            "q": "اگه ربات جواب نده، اول چی چک می‌کنی؟",
+            "options": ["آب‌وهوا", "اجرا بودن ربات", "ساعت برج", "رنگ گوشی"],
+            "answer": 1,
+        },
+        {
+            "q": "کدوم زبان این ربات رو راه انداخته؟",
+            "options": ["HTML", "Python", "Excel", "Photoshop"],
+            "answer": 1,
+        },
     ],
     "en": [
         {
@@ -228,6 +246,21 @@ QUIZ = {
         {
             "q": "HTTP 200 means…",
             "options": ["Fatal error", "OK", "Come back tomorrow", "Wrong password"],
+            "answer": 1,
+        },
+        {
+            "q": "Best lightweight DB for a small bot?",
+            "options": ["Paper", "SQLite", "Fax machine", "Radio"],
+            "answer": 1,
+        },
+        {
+            "q": "Bot silent? Check first…",
+            "options": ["Weather", "Is the bot running", "Tower clock", "Phone color"],
+            "answer": 1,
+        },
+        {
+            "q": "This bot is powered by…",
+            "options": ["HTML", "Python", "Excel", "Photoshop"],
             "answer": 1,
         },
     ],
@@ -283,23 +316,32 @@ UI = {
             "*منوی حرفه‌ای ربات*\n\n"
             "🎭 سرگرمی: جوک، تیکه، تعریف، فال روزانه\n"
             "🎮 بازی: جرات/حقیقت، کدوم‌و، کوییز، داستان\n"
-            "📊 حساب: آمار من، اشتراک‌گذاری\n"
+            "🏆 پیشرفت: آمار، بج‌ها، جدول امتیاز\n"
+            "👥 گروه: خوش‌آمدگویی خودکار به اعضای جدید\n"
             "⚙️ زبان: /fa /en\n\n"
             "توی هر چتی بنویس `@{bot}` تا اینلاین جوک بفرستی!"
         ),
         "menu_title": "🎛️ *منوی اصلی*\nیکی رو انتخاب کن:",
         "lang_set": "✅ زبان: فارسی",
         "typing_joke": "دارم جوک می‌سازم…",
-        "daily_used": "فال امروزت قبلاً گرفته شده 🔮\nفردا دوباره بیا!\n\n{fortune}",
-        "daily_new": "🔮 *فال امروز*\n{fortune}",
+        "daily_used": "فال امروزت قبلاً گرفته شده 🔮\nاستریک: *{streak}* روز\n\n{fortune}",
+        "daily_new": "🔮 *فال امروز*\n{fortune}\n\n🔥 استریک: *{streak}* روز",
         "stats": (
             "📊 *پروفایل خنده*\n"
             "نام: {name}\n"
             "جوک‌ها: {jokes}\n"
             "بازی‌ها: {games}\n"
             "امتیاز کوییز: {quiz}\n"
-            "فال روزانه: {daily}"
+            "فال روزانه: {daily}\n"
+            "استریک: {streak} 🔥"
         ),
+        "top": "🏆 *جدول خنده‌دارها*\n\n{rows}",
+        "top_empty": "هنوز کسی امتیاز نداره. اولین نفر باش!",
+        "top_row": "{rank}. {name} — {score} امتیاز (🧠{quiz})",
+        "badges": "🎖️ *بج‌های تو*\n\n{rows}",
+        "badges_empty": "هنوز بج نداری. جوک بگو، بازی کن، فال روزانه بگیر!",
+        "badge_new": "🎉 بج جدید باز شد: *{name}*",
+        "welcome": "خوش اومدی {name}! 🎉\nاینجا بخش خنده‌ست — بزن /menu",
         "share": "این ربات رو بفرست برای دوستات 👇",
         "share_text": "بیا این ربات خنده‌دار رو امتحان کن 😄",
         "story": "📖 {hero} رفت به {place}… {twist}… {ending}",
@@ -339,6 +381,8 @@ UI = {
             "ship": "💕 شیپ",
             "stats": "📊 آمار",
             "share": "📤 اشتراک",
+            "top": "🏆 جدول",
+            "badges": "🎖️ بج‌ها",
             "help": "❓ راهنما",
             "back": "↩️ بازگشت",
             "again": "🔁 دوباره",
@@ -359,6 +403,8 @@ UI = {
             ("quiz", "کوییز سریع"),
             ("story", "داستان آشوبی"),
             ("stats", "آمار من"),
+            ("top", "جدول امتیاز"),
+            ("badges", "بج‌های من"),
             ("share", "اشتراک‌گذاری"),
             ("fa", "فارسی"),
             ("en", "English"),
@@ -377,23 +423,32 @@ UI = {
             "*Pro bot menu*\n\n"
             "🎭 Fun: joke, roast, compliment, daily luck\n"
             "🎮 Games: truth/dare, would-you-rather, quiz, story\n"
-            "📊 Account: stats, share\n"
+            "🏆 Progress: stats, badges, leaderboard\n"
+            "👥 Groups: auto-welcome for new members\n"
             "⚙️ Language: /fa /en\n\n"
             "Type `@{bot}` in any chat for inline jokes!"
         ),
         "menu_title": "🎛️ *Main menu*\nPick one:",
         "lang_set": "✅ Language: English",
         "typing_joke": "Cooking a joke…",
-        "daily_used": "You already opened today's luck 🔮\nCome back tomorrow!\n\n{fortune}",
-        "daily_new": "🔮 *Daily luck*\n{fortune}",
+        "daily_used": "You already opened today's luck 🔮\nStreak: *{streak}* days\n\n{fortune}",
+        "daily_new": "🔮 *Daily luck*\n{fortune}\n\n🔥 Streak: *{streak}* days",
         "stats": (
             "📊 *Fun profile*\n"
             "Name: {name}\n"
             "Jokes: {jokes}\n"
             "Games: {games}\n"
             "Quiz score: {quiz}\n"
-            "Daily luck: {daily}"
+            "Daily luck: {daily}\n"
+            "Streak: {streak} 🔥"
         ),
+        "top": "🏆 *Leaderboard*\n\n{rows}",
+        "top_empty": "Nobody scored yet. Be first!",
+        "top_row": "{rank}. {name} — {score} pts (🧠{quiz})",
+        "badges": "🎖️ *Your badges*\n\n{rows}",
+        "badges_empty": "No badges yet. Joke, play, claim daily luck!",
+        "badge_new": "🎉 New badge unlocked: *{name}*",
+        "welcome": "Welcome {name}! 🎉\nThis chat is for laughs — tap /menu",
         "share": "Share this bot with friends 👇",
         "share_text": "Try this funny Telegram bot 😄",
         "story": "📖 {hero} went to {place}… {twist}… {ending}",
@@ -433,6 +488,8 @@ UI = {
             "ship": "💕 Ship",
             "stats": "📊 Stats",
             "share": "📤 Share",
+            "top": "🏆 Top",
+            "badges": "🎖️ Badges",
             "help": "❓ Help",
             "back": "↩️ Back",
             "again": "🔁 Again",
@@ -453,6 +510,8 @@ UI = {
             ("quiz", "Quick quiz"),
             ("story", "Chaos story"),
             ("stats", "My stats"),
+            ("top", "Leaderboard"),
+            ("badges", "My badges"),
             ("share", "Share bot"),
             ("fa", "فارسی"),
             ("en", "English"),
@@ -467,8 +526,10 @@ def lang(context: ContextTypes.DEFAULT_TYPE) -> str:
     return value if value in ("fa", "en") else "fa"
 
 
-def set_lang(context: ContextTypes.DEFAULT_TYPE, value: str) -> None:
+def set_lang(context: ContextTypes.DEFAULT_TYPE, value: str, user_id: int | None = None) -> None:
     context.user_data["lang"] = value
+    if user_id:
+        db.set_user_lang(user_id, value)
 
 
 def t(context: ContextTypes.DEFAULT_TYPE) -> dict:
@@ -482,10 +543,39 @@ def name_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     return user.first_name or user.username or t(context)["friend"]
 
 
-def bump(context: ContextTypes.DEFAULT_TYPE, key: str, amount: int = 1) -> int:
-    stats = context.user_data.setdefault("stats", {"jokes": 0, "games": 0, "quiz": 0, "daily": 0})
-    stats[key] = int(stats.get(key, 0)) + amount
-    return stats[key]
+def sync_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
+    user = update.effective_user
+    if not user:
+        return None
+    saved = db.ensure_user(user.id, name_of(update, context), lang(context))
+    if "lang" not in context.user_data and saved.get("lang") in ("fa", "en"):
+        context.user_data["lang"] = saved["lang"]
+    return user.id
+
+
+def bump(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, amount: int = 1) -> int:
+    user_id = sync_user(update, context)
+    if not user_id:
+        return 0
+    value = db.bump_stat(user_id, key, amount)
+    # Keep a light cache for UI
+    stats = context.user_data.setdefault("stats", {})
+    stats[key] = value
+    return value
+
+
+async def maybe_announce_badges(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None) -> None:
+    user_id = sync_user(update, context)
+    if not user_id:
+        return
+    newly = db.unlock_badges(user_id)
+    if not newly:
+        return
+    ui = t(context)
+    target = message or update.effective_message
+    for badge_id in newly:
+        label = db.BADGE_DEFS[badge_id][lang(context)]
+        await target.reply_text(ui["badge_new"].format(name=label), parse_mode=ParseMode.MARKDOWN)
 
 
 def reply_kb(context: ContextTypes.DEFAULT_TYPE) -> ReplyKeyboardMarkup:
@@ -508,7 +598,8 @@ def main_inline(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(b["joke"], callback_data="act:joke"), InlineKeyboardButton(b["roast"], callback_data="act:roast")],
             [InlineKeyboardButton(b["comp"], callback_data="act:comp"), InlineKeyboardButton(b["daily"], callback_data="act:daily")],
             [InlineKeyboardButton(b["tod"], callback_data="menu:games"), InlineKeyboardButton(b["quiz"], callback_data="act:quiz")],
-            [InlineKeyboardButton(b["stats"], callback_data="act:stats"), InlineKeyboardButton(b["share"], callback_data="act:share")],
+            [InlineKeyboardButton(b["stats"], callback_data="act:stats"), InlineKeyboardButton(b["top"], callback_data="act:top")],
+            [InlineKeyboardButton(b["badges"], callback_data="act:badges"), InlineKeyboardButton(b["share"], callback_data="act:share")],
             [InlineKeyboardButton(b["fa"], callback_data="lang:fa"), InlineKeyboardButton(b["en"], callback_data="lang:en")],
         ]
     )
@@ -542,6 +633,7 @@ async def typing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def setup_commands(app: Application) -> None:
+    db.init_db()
     fa_cmds = [BotCommand(c, d) for c, d in UI["fa"]["cmds"]]
     en_cmds = [BotCommand(c, d) for c, d in UI["en"]["cmds"]]
     await app.bot.set_my_commands(fa_cmds, scope=BotCommandScopeDefault(), language_code="fa")
@@ -553,8 +645,9 @@ async def setup_commands(app: Application) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sync_user(update, context)
     if "lang" not in context.user_data:
-        set_lang(context, "fa")
+        set_lang(context, "fa", update.effective_user.id if update.effective_user else None)
     await typing(update, context)
     text = t(context)["start"].format(name=name_of(update, context))
     await update.message.reply_text(
@@ -570,6 +663,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sync_user(update, context)
     bot = context.application.bot_data.get("username", "bot")
     await update.message.reply_text(
         t(context)["help"].format(bot=bot),
@@ -579,6 +673,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sync_user(update, context)
     await update.message.reply_text(
         t(context)["menu_title"],
         parse_mode=ParseMode.MARKDOWN,
@@ -587,19 +682,21 @@ async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def set_fa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_lang(context, "fa")
+    uid = sync_user(update, context)
+    set_lang(context, "fa", uid)
     await update.message.reply_text(UI["fa"]["lang_set"], reply_markup=reply_kb(context))
     await menu_cmd(update, context)
 
 
 async def set_en(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_lang(context, "en")
+    uid = sync_user(update, context)
+    set_lang(context, "en", uid)
     await update.message.reply_text(UI["en"]["lang_set"], reply_markup=reply_kb(context))
     await menu_cmd(update, context)
 
 
-def joke_text(context: ContextTypes.DEFAULT_TYPE) -> str:
-    bump(context, "jokes")
+def joke_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    bump(update, context, "jokes")
     return f"😂 {random.choice(JOKES[lang(context)])}"
 
 
@@ -611,8 +708,8 @@ def comp_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     return f"💖 {random.choice(COMPLIMENTS[lang(context)]).format(name=name_of(update, context))}"
 
 
-def story_text(context: ContextTypes.DEFAULT_TYPE) -> str:
-    bump(context, "games")
+def story_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    bump(update, context, "games")
     bits = STORY_BITS[lang(context)]
     return t(context)["story"].format(
         hero=random.choice(bits["heroes"]),
@@ -622,28 +719,60 @@ def story_text(context: ContextTypes.DEFAULT_TYPE) -> str:
     )
 
 
-def daily_text(context: ContextTypes.DEFAULT_TYPE) -> str:
-    today = date.today().isoformat()
-    cached = context.user_data.get("daily_date")
-    fortune = context.user_data.get("daily_fortune")
-    if cached == today and fortune:
-        return t(context)["daily_used"].format(fortune=fortune)
-    fortune = random.choice(FORTUNES[lang(context)])
-    context.user_data["daily_date"] = today
-    context.user_data["daily_fortune"] = fortune
-    bump(context, "daily")
-    return t(context)["daily_new"].format(fortune=fortune)
+def daily_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    sync_user(update, context)
+    user = update.effective_user
+    fortune_pool = random.choice(FORTUNES[lang(context)])
+    if not user:
+        return t(context)["daily_new"].format(fortune=fortune_pool, streak=1)
+    is_new, fortune, streak = db.claim_daily(user.id, fortune_pool)
+    key = "daily_new" if is_new else "daily_used"
+    return t(context)[key].format(fortune=fortune, streak=streak)
 
 
 def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    s = context.user_data.setdefault("stats", {"jokes": 0, "games": 0, "quiz": 0, "daily": 0})
+    user_id = sync_user(update, context)
+    s = db.get_stats(user_id) if user_id else {}
     return t(context)["stats"].format(
         name=name_of(update, context),
         jokes=s.get("jokes", 0),
         games=s.get("games", 0),
         quiz=s.get("quiz", 0),
         daily=s.get("daily", 0),
+        streak=s.get("streak", 0),
     )
+
+
+def top_text(context: ContextTypes.DEFAULT_TYPE) -> str:
+    rows = db.leaderboard(10)
+    ui = t(context)
+    if not rows:
+        return ui["top"].format(rows=ui["top_empty"])
+    lines = []
+    for i, row in enumerate(rows, start=1):
+        name = row.get("name") or ui["friend"]
+        lines.append(
+            ui["top_row"].format(
+                rank=i,
+                name=name,
+                score=row.get("score", 0),
+                quiz=row.get("quiz", 0),
+            )
+        )
+    return ui["top"].format(rows="\n".join(lines))
+
+
+def badges_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    user_id = sync_user(update, context)
+    ui = t(context)
+    if not user_id:
+        return ui["badges"].format(rows=ui["badges_empty"])
+    user = db.get_stats(user_id)
+    owned = db.badge_list(user.get("badges", ""))
+    if not owned:
+        return ui["badges"].format(rows=ui["badges_empty"])
+    lines = [f"• {db.BADGE_DEFS[b][lang(context)]}" for b in owned if b in db.BADGE_DEFS]
+    return ui["badges"].format(rows="\n".join(lines) or ui["badges_empty"])
 
 
 async def send_share(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None) -> None:
@@ -659,7 +788,8 @@ async def send_share(update: Update, context: ContextTypes.DEFAULT_TYPE, message
 
 async def joke_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await typing(update, context)
-    await update.message.reply_text(joke_text(context), reply_markup=again_kb(context, "joke"))
+    await update.message.reply_text(joke_text(update, context), reply_markup=again_kb(context, "joke"))
+    await maybe_announce_badges(update, context)
 
 
 async def roast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -671,15 +801,38 @@ async def compliment_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def daily_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(daily_text(context), parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "daily"))
+    await update.message.reply_text(
+        daily_text(update, context),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=again_kb(context, "daily"),
+    )
+    await maybe_announce_badges(update, context)
 
 
 async def story_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(story_text(context), reply_markup=again_kb(context, "story"))
+    await update.message.reply_text(story_text(update, context), reply_markup=again_kb(context, "story"))
+    await maybe_announce_badges(update, context)
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(stats_text(update, context), parse_mode=ParseMode.MARKDOWN, reply_markup=main_inline(context))
+    await update.message.reply_text(
+        stats_text(update, context),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_inline(context),
+    )
+
+
+async def top_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sync_user(update, context)
+    await update.message.reply_text(top_text(context), parse_mode=ParseMode.MARKDOWN, reply_markup=main_inline(context))
+
+
+async def badges_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        badges_text(update, context),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_inline(context),
+    )
 
 
 async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -699,7 +852,7 @@ async def tod_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def wyr_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     a, b_opt = random.choice(WYR[lang(context)])
-    bump(context, "games")
+    bump(update, context, "games")
     kb = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(f"🅰️ {a}", callback_data="wyr:pick")],
@@ -709,6 +862,7 @@ async def wyr_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
     )
     await update.message.reply_text(t(context)["wyr_title"], reply_markup=kb)
+    await maybe_announce_badges(update, context)
 
 
 async def quiz_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -735,10 +889,21 @@ async def ship_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(ui["ship"].format(heart=heart, a=a, b=b, score=score), parse_mode=ParseMode.MARKDOWN)
 
 
+async def welcome_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.new_chat_members:
+        return
+    ui = t(context)
+    for member in update.message.new_chat_members:
+        if member.is_bot:
+            continue
+        name = member.first_name or member.username or ui["friend"]
+        await update.message.reply_text(ui["welcome"].format(name=name))
+
+
 async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, message) -> None:
     item = random.choice(QUIZ[lang(context)])
     context.user_data["quiz"] = item
-    bump(context, "games")
+    bump(update, context, "games")
     buttons = [
         [InlineKeyboardButton(opt, callback_data=f"quiz:{i}")]
         for i, opt in enumerate(item["options"])
@@ -749,6 +914,7 @@ async def send_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, message)
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
+    await maybe_announce_badges(update, context, message=message)
 
 
 async def safe_edit(query, text: str, reply_markup=None, parse_mode=None) -> None:
@@ -761,11 +927,13 @@ async def safe_edit(query, text: str, reply_markup=None, parse_mode=None) -> Non
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    sync_user(update, context)
     data = query.data or ""
     ui = t(context)
+    uid = update.effective_user.id if update.effective_user else None
 
     if data.startswith("lang:"):
-        set_lang(context, data.split(":", 1)[1])
+        set_lang(context, data.split(":", 1)[1], uid)
         await query.message.reply_text(t(context)["lang_set"], reply_markup=reply_kb(context))
         await safe_edit(query, t(context)["menu_title"], main_inline(context), ParseMode.MARKDOWN)
         return
@@ -780,7 +948,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if data.startswith("tod:"):
         kind = data.split(":", 1)[1]
-        bump(context, "games")
+        bump(update, context, "games")
         if kind == "truth":
             text = ui["truth"].format(text=random.choice(TRUTHS[lang(context)]))
         else:
@@ -793,6 +961,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             ]
         )
         await query.message.reply_text(text, reply_markup=kb)
+        await maybe_announce_badges(update, context, message=query.message)
         return
 
     if data == "wyr:pick":
@@ -806,12 +975,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         choice = int(data.split(":", 1)[1])
         if choice == item["answer"]:
-            score = bump(context, "quiz", 10)
+            score = bump(update, context, "quiz", 10)
             msg = ui["quiz_ok"].format(score=score)
         else:
-            score = context.user_data.get("stats", {}).get("quiz", 0)
+            user_id = sync_user(update, context)
+            score = db.get_stats(user_id).get("quiz", 0) if user_id else 0
             msg = ui["quiz_bad"].format(ans=item["options"][item["answer"]], score=score)
         await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "quiz"))
+        await maybe_announce_badges(update, context, message=query.message)
         return
 
     if data.startswith("act:"):
@@ -819,22 +990,45 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await context.bot.send_chat_action(chat_id=query.message.chat_id, action=ChatAction.TYPING)
 
         if action == "joke":
-            await query.message.reply_text(joke_text(context), reply_markup=again_kb(context, "joke"))
+            await query.message.reply_text(joke_text(update, context), reply_markup=again_kb(context, "joke"))
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "roast":
             await query.message.reply_text(roast_text(update, context), reply_markup=again_kb(context, "roast"))
         elif action == "comp":
             await query.message.reply_text(comp_text(update, context), reply_markup=again_kb(context, "comp"))
         elif action == "daily":
-            await query.message.reply_text(daily_text(context), parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "daily"))
+            await query.message.reply_text(
+                daily_text(update, context),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=again_kb(context, "daily"),
+            )
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "story":
-            await query.message.reply_text(story_text(context), reply_markup=again_kb(context, "story"))
+            await query.message.reply_text(story_text(update, context), reply_markup=again_kb(context, "story"))
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "stats":
-            await query.message.reply_text(stats_text(update, context), parse_mode=ParseMode.MARKDOWN, reply_markup=main_inline(context))
+            await query.message.reply_text(
+                stats_text(update, context),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=main_inline(context),
+            )
+        elif action == "top":
+            await query.message.reply_text(top_text(context), parse_mode=ParseMode.MARKDOWN, reply_markup=main_inline(context))
+        elif action == "badges":
+            await query.message.reply_text(
+                badges_text(update, context),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=main_inline(context),
+            )
         elif action == "share":
             await send_share(update, context, message=query.message)
         elif action == "coin":
             side = random.choice(ui["coin_sides"])
-            await query.message.reply_text(ui["coin"].format(side=side), parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "coin"))
+            await query.message.reply_text(
+                ui["coin"].format(side=side),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=again_kb(context, "coin"),
+            )
         elif action == "tod":
             b = ui["btn"]
             kb = InlineKeyboardMarkup(
@@ -846,7 +1040,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await query.message.reply_text(ui["tod_title"], reply_markup=kb)
         elif action == "wyr":
             a, b_opt = random.choice(WYR[lang(context)])
-            bump(context, "games")
+            bump(update, context, "games")
             kb = InlineKeyboardMarkup(
                 [
                     [InlineKeyboardButton(f"🅰️ {a}", callback_data="wyr:pick")],
@@ -856,6 +1050,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 ]
             )
             await query.message.reply_text(ui["wyr_title"], reply_markup=kb)
+            await maybe_announce_badges(update, context, message=query.message)
         elif action == "quiz":
             await send_quiz(update, context, query.message)
 
@@ -863,8 +1058,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text_raw = update.message.text or ""
     text = text_raw.strip()
+    sync_user(update, context)
     if "lang" not in context.user_data and PERSIAN_RE.search(text_raw):
-        set_lang(context, "fa")
+        uid = update.effective_user.id if update.effective_user else None
+        set_lang(context, "fa", uid)
 
     kb = t(context)["kb"]
     mapping = {
@@ -974,12 +1171,15 @@ def main() -> None:
     app.add_handler(CommandHandler("quiz", quiz_cmd))
     app.add_handler(CommandHandler("story", story_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("top", top_cmd))
+    app.add_handler(CommandHandler("badges", badges_cmd))
     app.add_handler(CommandHandler("share", share_cmd))
     app.add_handler(CommandHandler("flip", coin_cmd))
     app.add_handler(CommandHandler("coin", coin_cmd))
     app.add_handler(CommandHandler("ship", ship_cmd))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_members))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)
 
