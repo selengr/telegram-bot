@@ -24,6 +24,7 @@ from telegram import (
 )
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -40,7 +41,7 @@ import hangman as hangman_game
 
 load_dotenv()
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 BOT_SHORT_FA = "ربات خنده با جوک، بازی، XP و دوستان"
 BOT_SHORT_EN = "Funny bot with jokes, games, XP & friends"
 BOT_DESC_FA = (
@@ -609,6 +610,11 @@ UI = {
 }
 
 
+def md(text: object) -> str:
+    """Escape user text for classic Telegram Markdown."""
+    return escape_markdown(str(text), version=1)
+
+
 def lang(context: ContextTypes.DEFAULT_TYPE) -> str:
     value = context.user_data.get("lang")
     return value if value in ("fa", "en") else "fa"
@@ -713,6 +719,7 @@ def main_inline(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(b["comp"], callback_data="act:comp"), InlineKeyboardButton(b["daily"], callback_data="act:daily")],
             [InlineKeyboardButton(b["hang"], callback_data="act:hang"), InlineKeyboardButton(b["quiz"], callback_data="act:quiz")],
             [InlineKeyboardButton(b["stats"], callback_data="act:stats"), InlineKeyboardButton(b["top"], callback_data="act:top")],
+            [InlineKeyboardButton(b["badges"], callback_data="act:badges"), InlineKeyboardButton(b["share"], callback_data="act:share")],
             [InlineKeyboardButton(b["invite"], callback_data="act:invite"), InlineKeyboardButton(b["remind"], callback_data="act:remind")],
             [InlineKeyboardButton(b["fa"], callback_data="lang:fa"), InlineKeyboardButton(b["en"], callback_data="lang:en")],
         ]
@@ -769,7 +776,9 @@ async def setup_commands(app: Application) -> None:
     app.bot_data["username"] = me.username or ""
     if app.job_queue:
         app.job_queue.run_daily(send_morning_reminders, time=dt_time(hour=9, minute=0))
-        logger.info("Daily reminder job scheduled at 09:00")
+        logger.info("Daily reminder job scheduled at 09:00 local time")
+    else:
+        logger.warning("job_queue missing — /remind will not send morning jokes. Install: pip install 'python-telegram-bot[job-queue]'")
     logger.info("Funny Friends Bot v%s ready @%s", VERSION, me.username)
 
 
@@ -802,6 +811,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if db.apply_referral(user.id, ref_id):
                 await update.message.reply_text(t(context)["invite_ok"], parse_mode=ParseMode.MARKDOWN)
                 await maybe_announce_badges(update, context)
+            else:
+                tip = "لینک دعوت معتبر نبود 😅" if lang(context) == "fa" else "Invite link was not valid 😅"
+                await update.message.reply_text(tip)
 
     await typing(update, context)
     text = t(context)["start"].format(name=name_of(update, context))
@@ -901,8 +913,8 @@ def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     s = db.get_stats(user_id) if user_id else {}
     xp = int(s.get("xp", 0) or 0)
     return t(context)["stats"].format(
-        name=name_of(update, context),
-        title=db.title_for(xp, lang(context)),
+        name=md(name_of(update, context)),
+        title=md(db.title_for(xp, lang(context))),
         level=db.level_from_xp(xp),
         xp=xp,
         bar=db.xp_bar(xp),
@@ -928,7 +940,7 @@ def top_text(context: ContextTypes.DEFAULT_TYPE) -> str:
         lines.append(
             ui["top_row"].format(
                 rank=i,
-                name=name,
+                name=md(name),
                 level=db.level_from_xp(xp),
                 xp=xp,
             )
@@ -1047,6 +1059,7 @@ async def resolve_hangman(
     context: ContextTypes.DEFAULT_TYPE,
     letter: str,
     message,
+    edit: bool = False,
 ) -> None:
     game = context.user_data.get("hangman")
     ui = t(context)
@@ -1057,30 +1070,28 @@ async def resolve_hangman(
     if status == "repeat":
         await message.reply_text(ui["hang_repeat"])
         return
+
+    async def send(text: str, reply_markup=None) -> None:
+        if edit:
+            try:
+                await message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+                return
+            except BadRequest:
+                pass
+        await message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
     if status == "win":
         context.user_data.pop("hangman", None)
         bump(update, context, "hangman_wins")
         award_xp(context, 30)
-        await message.reply_text(
-            ui["hang_win"].format(word=game["word"]),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=again_kb(context, "hang"),
-        )
+        await send(ui["hang_win"].format(word=md(game["word"])), again_kb(context, "hang"))
         await maybe_announce_badges(update, context, message=message)
         return
     if status == "lose":
         context.user_data.pop("hangman", None)
-        await message.reply_text(
-            ui["hang_lose"].format(word=game["word"]),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=again_kb(context, "hang"),
-        )
+        await send(ui["hang_lose"].format(word=md(game["word"])), again_kb(context, "hang"))
         return
-    await message.reply_text(
-        hangman_game.render(game, lang(context)),
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=hangman_markup(context, game),
-    )
+    await send(hangman_game.render(game, lang(context)), hangman_markup(context, game))
 
 
 async def hangman_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1172,7 +1183,10 @@ async def ship_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     a, b = context.args[0], context.args[1]
     score = random.randint(1, 100)
     heart = "💕" if score >= 70 else "🙂" if score >= 40 else "💀"
-    await update.message.reply_text(ui["ship"].format(heart=heart, a=a, b=b, score=score), parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(
+        ui["ship"].format(heart=heart, a=md(a), b=md(b), score=score),
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 async def welcome_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1213,11 +1227,16 @@ async def safe_edit(query, text: str, reply_markup=None, parse_mode=None) -> Non
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     sync_user(update, context)
     data = query.data or ""
     ui = t(context)
     uid = update.effective_user.id if update.effective_user else None
+
+    # Answer once — special toast for would-you-rather picks
+    if data == "wyr:pick":
+        await query.answer("😏" if lang(context) == "en" else "انتخاب جالبی بود 😏", show_alert=False)
+        return
+    await query.answer()
 
     if data.startswith("lang:"):
         set_lang(context, data.split(":", 1)[1], uid)
@@ -1252,12 +1271,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await maybe_announce_badges(update, context, message=query.message)
         return
 
-    if data == "wyr:pick":
-        await query.answer("😏" if lang(context) == "en" else "انتخاب جالبی بود 😏", show_alert=False)
-        return
-
     if data.startswith("quiz:"):
-        item = context.user_data.get("quiz")
+        item = context.user_data.pop("quiz", None)
         if not item:
             await query.message.reply_text(ui["menu_title"], reply_markup=main_inline(context), parse_mode=ParseMode.MARKDOWN)
             return
@@ -1269,14 +1284,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         else:
             user_id = sync_user(update, context)
             score = db.get_stats(user_id).get("quiz", 0) if user_id else 0
-            msg = ui["quiz_bad"].format(ans=item["options"][item["answer"]], score=score)
+            ans = md(item["options"][item["answer"]])
+            msg = ui["quiz_bad"].format(ans=ans, score=score)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
         await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=again_kb(context, "quiz"))
         await maybe_announce_badges(update, context, message=query.message)
         return
 
     if data.startswith("hg:"):
         letter = data.split(":", 1)[1]
-        await resolve_hangman(update, context, letter, query.message)
+        await resolve_hangman(update, context, letter, query.message, edit=True)
         return
 
     if data.startswith("act:"):
@@ -1501,7 +1521,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)
 
-    logger.info("Pro Funny Bot online at %s", datetime.now().isoformat(timespec="seconds"))
+    logger.info("Starting Funny Friends Bot v%s", VERSION)
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 

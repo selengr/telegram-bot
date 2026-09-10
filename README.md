@@ -77,8 +77,10 @@ Or use `/invite` inside the bot for your personal invite link.
 | `/quiz` | Quiz |
 | `/stats` | Your XP profile |
 | `/top` | Leaderboard |
+| `/badges` | Badges |
 | `/invite` | Invite link |
 | `/remind` | Morning joke on/off |
+| `/share` | Share bot |
 | `/fa` `/en` | Language |
 | `/about` | About |
 | `/help` | Help |
@@ -107,6 +109,12 @@ Or use `/invite` inside the bot for your personal invite link.
 
 ## Version
 
-`v1.0.0` — ready to share with friends.
+`v1.0.1` — ready to share with friends.
+
+## Notes
+
+- Keep the bot process running (your Mac or a server). Morning reminders need it up around **09:00 local time**.
+- Your token stays in `.env` and is never pushed to GitHub.
+- Optional in BotFather: add a profile photo (description is set by the bot automatically).
 
 Made for fun. Enjoy.

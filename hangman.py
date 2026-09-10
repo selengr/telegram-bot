@@ -53,8 +53,12 @@ HANGMAN_PICS = [
 ]
 
 
-def normalize(word: str) -> str:
-    return word.strip()
+def _is_persian(word: str) -> bool:
+    return bool(re.search(r"[\u0600-\u06FF]", word))
+
+
+def _norm_char(ch: str, persian: bool) -> str:
+    return ch if persian else ch.lower()
 
 
 def start_game(lang: str) -> dict:
@@ -68,21 +72,23 @@ def start_game(lang: str) -> dict:
 
 
 def mask(word: str, guessed: list[str]) -> str:
+    persian = _is_persian(word)
+    guessed_norm = {_norm_char(g, persian) for g in guessed}
     out = []
     for ch in word:
         if ch == " ":
             out.append(" ")
-        elif ch in guessed:
+        elif _norm_char(ch, persian) in guessed_norm:
             out.append(ch)
         else:
-            out.append("＿" if re.search(r"[\u0600-\u06FF]", word) else "_")
+            out.append("＿" if persian else "_")
     return " ".join(out)
 
 
 def render(game: dict, lang: str = "fa") -> str:
     pic = HANGMAN_PICS[min(game["wrong"], len(HANGMAN_PICS) - 1)]
     board = mask(game["word"], game["guessed"])
-    guessed = " ".join(game["guessed"]) or ("—" if lang == "fa" else "—")
+    guessed = " ".join(game["guessed"]) or "—"
     if lang == "fa":
         return (
             f"*حدس کلمه*\n```\n{pic}\n```\n"
@@ -98,32 +104,44 @@ def render(game: dict, lang: str = "fa") -> str:
     )
 
 
+def _won(game: dict) -> bool:
+    word = game["word"]
+    persian = _is_persian(word)
+    guessed_norm = {_norm_char(g, persian) for g in game["guessed"]}
+    return all(ch == " " or _norm_char(ch, persian) in guessed_norm for ch in word)
+
+
 def guess(game: dict, letter: str) -> str:
     """Apply guess. Returns status: ok|repeat|wrong|win|lose."""
     letter = letter.strip()
     if not letter:
         return "repeat"
-    # allow full word guess
+
+    word = game["word"]
+    persian = _is_persian(word)
+    if not persian:
+        letter = letter.lower()
+
+    # full word guess
     if len(letter) > 1:
-        if letter == game["word"]:
-            game["guessed"] = list(dict.fromkeys(list(game["word"]) + game["guessed"]))
+        target = word if persian else word.lower()
+        if letter == target:
+            game["guessed"] = list(dict.fromkeys(list(word) + game["guessed"]))
             return "win"
         game["wrong"] += 1
-        if game["wrong"] >= game["max_wrong"]:
-            return "lose"
-        return "wrong"
+        return "lose" if game["wrong"] >= game["max_wrong"] else "wrong"
 
-    if letter in game["guessed"]:
+    guessed_norm = {_norm_char(g, persian) for g in game["guessed"]}
+    if _norm_char(letter, persian) in guessed_norm:
         return "repeat"
+
     game["guessed"].append(letter)
-    if letter not in game["word"]:
+    word_chars = {_norm_char(ch, persian) for ch in word if ch != " "}
+    if _norm_char(letter, persian) not in word_chars:
         game["wrong"] += 1
-        if game["wrong"] >= game["max_wrong"]:
-            return "lose"
-        return "wrong"
-    if all(ch == " " or ch in game["guessed"] for ch in game["word"]):
-        return "win"
-    return "ok"
+        return "lose" if game["wrong"] >= game["max_wrong"] else "wrong"
+
+    return "win" if _won(game) else "ok"
 
 
 def letter_keyboard(lang: str):
