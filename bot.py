@@ -40,6 +40,20 @@ import hangman as hangman_game
 
 load_dotenv()
 
+VERSION = "1.0.0"
+BOT_SHORT_FA = "ربات خنده با جوک، بازی، XP و دوستان"
+BOT_SHORT_EN = "Funny bot with jokes, games, XP & friends"
+BOT_DESC_FA = (
+    "ربات سرگرمی دوستانه‌ست.\n"
+    "جوک، تیکه، فال روزانه، کوییز، حدس کلمه، جدول امتیاز و دعوت دوستان.\n"
+    "فارسی و انگلیسی. بزن /start"
+)
+BOT_DESC_EN = (
+    "A friendly fun bot for your group.\n"
+    "Jokes, roasts, daily luck, quiz, hangman, leaderboard and invites.\n"
+    "Persian & English. Tap /start"
+)
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -366,6 +380,13 @@ UI = {
         "hang_lose": "💀 باختی! کلمه: *{word}*",
         "hang_repeat": "این حرف رو قبلاً زدی.",
         "rate_limit": "آروم‌تر رفیق 😅 یه لحظه صبر کن.",
+        "about": (
+            "🤖 *Funny Friends Bot* `v{version}`\n\n"
+            "یه ربات سرگرمی برای تو و دوستات.\n"
+            "جوک · بازی · XP · بج · دعوت · گروه\n\n"
+            "لینک: https://t.me/{bot}\n"
+            "شروع سریع: /menu"
+        ),
         "share": "این ربات رو بفرست برای دوستات 👇",
         "share_text": "بیا این ربات خنده‌دار رو امتحان کن 😄",
         "story": "📖 {hero} رفت به {place}… {twist}… {ending}",
@@ -436,6 +457,7 @@ UI = {
             ("invite", "لینک دعوت"),
             ("remind", "یادآور روزانه"),
             ("share", "اشتراک‌گذاری"),
+            ("about", "درباره ربات"),
             ("fa", "فارسی"),
             ("en", "English"),
             ("help", "راهنما"),
@@ -501,6 +523,13 @@ UI = {
         "hang_lose": "💀 You lost! Word: *{word}*",
         "hang_repeat": "You already tried that.",
         "rate_limit": "Slow down a sec 😅",
+        "about": (
+            "🤖 *Funny Friends Bot* `v{version}`\n\n"
+            "A fun bot for you and your friends.\n"
+            "Jokes · games · XP · badges · invites · groups\n\n"
+            "Link: https://t.me/{bot}\n"
+            "Quick start: /menu"
+        ),
         "share": "Share this bot with friends 👇",
         "share_text": "Try this funny Telegram bot 😄",
         "story": "📖 {hero} went to {place}… {twist}… {ending}",
@@ -571,6 +600,7 @@ UI = {
             ("invite", "Invite link"),
             ("remind", "Daily reminder"),
             ("share", "Share bot"),
+            ("about", "About this bot"),
             ("fa", "فارسی"),
             ("en", "English"),
             ("help", "Help"),
@@ -723,13 +753,24 @@ async def setup_commands(app: Application) -> None:
     await app.bot.set_my_commands(fa_cmds, scope=BotCommandScopeDefault(), language_code="fa")
     await app.bot.set_my_commands(en_cmds, scope=BotCommandScopeDefault(), language_code="en")
     await app.bot.set_my_commands(fa_cmds, scope=BotCommandScopeDefault())
+
+    # Public profile text (helps when people open the bot page)
+    try:
+        await app.bot.set_my_short_description(BOT_SHORT_FA, language_code="fa")
+        await app.bot.set_my_short_description(BOT_SHORT_EN, language_code="en")
+        await app.bot.set_my_short_description(BOT_SHORT_FA)
+        await app.bot.set_my_description(BOT_DESC_FA, language_code="fa")
+        await app.bot.set_my_description(BOT_DESC_EN, language_code="en")
+        await app.bot.set_my_description(BOT_DESC_FA)
+    except Exception:
+        logger.exception("Could not set bot profile description")
+
     me = await app.bot.get_me()
     app.bot_data["username"] = me.username or ""
     if app.job_queue:
-        # Local morning reminder ~09:00 (server time)
         app.job_queue.run_daily(send_morning_reminders, time=dt_time(hour=9, minute=0))
         logger.info("Daily reminder job scheduled at 09:00")
-    logger.info("Commands menu set. Bot @%s", me.username)
+    logger.info("Funny Friends Bot v%s ready @%s", VERSION, me.username)
 
 
 async def send_morning_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1071,6 +1112,16 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def share_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_share(update, context)
+
+
+async def about_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sync_user(update, context)
+    bot = context.application.bot_data.get("username", "r_helper_fun_bot")
+    await update.effective_message.reply_text(
+        t(context)["about"].format(version=VERSION, bot=bot),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_inline(context),
+    )
 
 
 async def tod_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1440,6 +1491,7 @@ def main() -> None:
     app.add_handler(CommandHandler("invite", invite_cmd))
     app.add_handler(CommandHandler("remind", remind_cmd))
     app.add_handler(CommandHandler("share", share_cmd))
+    app.add_handler(CommandHandler("about", about_cmd))
     app.add_handler(CommandHandler("flip", coin_cmd))
     app.add_handler(CommandHandler("coin", coin_cmd))
     app.add_handler(CommandHandler("ship", ship_cmd))
